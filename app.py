@@ -145,6 +145,7 @@ def main():
         
         #Load the url of the next chapterand the translation
         currChapTrans = reponse.choices[0].message.content
+        
 
         
 
