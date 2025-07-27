@@ -11,6 +11,7 @@ api_key = connect["info"]["api_key"]
 model = connect["info"]["model"]
 
 
+
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key= api_key
@@ -47,22 +48,22 @@ def main():
     2. **Extract** the full URL of the “next chapter.”  
     3. **Translate** the novel title into {lang}.  
     4. **Translate** the *current* chapter’s body text into {lang}.  
-    - **Highest priority**: produce a fluent, natural, error‑free translation.  
+    - **Highest priority**: high-quality translation (produce a fluent, natural, error‑free).  
     - After your first pass, **reread and refine** for accuracy, consistency, and style.
 
 
-    **Output format** (nothing else):
+    **Output format** :
 
 
     <Translated Novel Title>
     ---
     <Next Chapter FULL URL>
     ---
-    <Translated Chapter Text>
+    <Translated Chapter Text> (just plain text for reading)
 
 
-    - **Do not** output anything else (no HTML, no commentary, no extra labels).
-    - "Only two" separators are in the response. Do not use this symbol anywhere else
+    - **Do not** output anything else (no HTML tag, no commentary, no extra labels, just the content of the chapter).
+    - "Only two" separators for three parts are in the response. Do not use this symbol anywhere else
 
 
     Here is the HTML to process:
