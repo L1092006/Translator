@@ -119,7 +119,7 @@ def getWeb(port=DEBUG_PORT):
 def close_all(webs):
     #Check input
     if len(webs) != 3:
-        raise RuntimeError(f"close_all got {len(webs)} args, expected 4")
+        raise RuntimeError(f"close_all got {len(webs)} args, expected 3")
 
     #Close context
     webs[2].close()

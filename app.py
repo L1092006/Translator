@@ -1,21 +1,31 @@
 import configparser
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 import argparse
 from ftfy import fix_text
 from bs4 import BeautifulSoup
 from playwright.sync_api import Error
 import test as wh
+from pathlib import Path
+import sys
+import time
 
 
 
+#Get the path to Info
+info = Path(__file__).resolve().parent / "Info" 
 
 
 
 #Load api_key and model from connect.config
 connect = configparser.ConfigParser()
-connect.read("connect.config")
-api_key = connect["info"]["api_key"]
+connect.read(str(info / "connect.config"))
 myModel = connect["info"]["model"]
+#Get the path to keys
+keysFile = info / "keys.txt"
+with keysFile.open( "r", encoding="utf-8") as k:
+    keys = [line.strip() for line in k]
+    api_key = keys[int(connect["info"]["api_key"])]
+
 
 
 #Connect to AI
@@ -27,17 +37,15 @@ client = OpenAI(
 
 #Load command-line arguements
 parser = argparse.ArgumentParser()
-parser.add_argument("novelUrl", help="Enter the url of the novel web")
+parser.add_argument("name", help="Enter the name of the novel")
 parser.add_argument("currChap", help="Enter the current chapter")
-parser.add_argument("toChap", help="Enter the chapter you want to translate to")
 parser.add_argument("lang", help="Enter the language to translate to")
 args = parser.parse_args()
 
 
 #Load command-line arguments into global variables
-novelUrl = args.novelUrl
+name = args.name
 currChap = int(args.currChap)
-toChap = int(args.toChap)
 lang = args.lang
 
 
@@ -57,7 +65,6 @@ def getSoup(url, page):
 #Get all chapter link at once
 def allAtOnce():
     global currChap
-    currUrl= novelUrl
 
     #Launch chrome and login if needed
     wh.launch_chrome()
@@ -83,11 +90,12 @@ def allAtOnce():
        
         #Close webs component
         wh.close_all(webs)
+        time.sleep(2)
 
 
     i = 0
     #Translate the chapters
-    while currChap <= toChap:
+    while i < len(soups):
         print(f"Processing chap {currChap}")
         #Get the soup
         soup = soups[i]
@@ -97,9 +105,12 @@ def allAtOnce():
         #Translate the text
         currChapTrans = translate(text)
 
+        #Create novels/novelName directory 
+        novel = info.parent / "novels" / name
+        novel.mkdir(parents=True, exist_ok=True)
 
         #save it into a file
-        with open(f"novels/chapter{currChap}.txt", "w", encoding="utf-8") as file:
+        with (novel / f"chapter{currChap}.txt").open("w", encoding="utf-8") as file:
             file.write(currChapTrans)
 
 
@@ -111,8 +122,9 @@ def allAtOnce():
 #Navigate from chapter to chapter
 def chapToChap(page):
     global currChap
-    currUrl = novelUrl
-    while currChap <= toChap:
+    currUrl = "novelUrl"
+    #Replace 1 by toChap
+    while currChap < 1:
         print(f"Processing chap {currChap}")
         #Get the soup from currUrl
         soup = getSoup(currUrl, page)
@@ -187,6 +199,7 @@ def chapToChap(page):
 
 
 def translate(text):
+    global client
     #Create the promt to translate text
     prompt = f"""
     You’re given the text extracted from the HTML of a chapter on a web‑novel site. Your job is to:
@@ -200,18 +213,47 @@ def translate(text):
     Here is the text to process:
     {text}
     """
-    # Get the reposnse from AI
-    reponse = client.chat.completions.create(
-        model=myModel,
-        messages=[
-            {
-            "role": "user",
-            "content": prompt
-            }
-        ]
-    )
-       
-    #Load the url of the next chapterand the translation
+
+    #Number of tries, max is the number of keys in keys.text
+    i = 0
+    while i < len(keys):
+        #Try to get the respons, switch model if rate-limit is exceeded
+        try:
+            # Get the reposnse from AI
+            reponse = client.chat.completions.create(
+                model=myModel,
+                messages=[
+                    {
+                    "role": "user",
+                    "content": prompt
+                    }
+                ]
+            )
+            break
+        except RateLimitError:
+            print("Rate limit exceeded")
+
+            #Check if tried all the keys
+            i += 1
+            if i >= len(keys):
+                break
+
+            #Update the new key
+            newKey = (int(connect["info"]["api_key"]) + 1) % len(keys)
+            connect["info"]["api_key"] = str(newKey)
+            with (info / "connect.config").open( "w", encoding="utf-8") as c:
+                connect.write(c)
+            api_key = keys[newKey]
+            client = OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key= api_key
+            )
+            print(f"Changed to key {newKey}. Retrying {i}")
+
+    if i == len(keys):
+        sys.exit("All keys exhausted, please add new key or wait a day")
+
+    #Load the url of the next chapter and the translation
     return reponse.choices[0].message.content
 
 
