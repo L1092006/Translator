@@ -1,5 +1,5 @@
 test.py
-connect.config
-Keys.txt
+info/
 extractLink.py
 novels/
+__pycache__/
