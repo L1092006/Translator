@@ -11,8 +11,14 @@ import time
 
 
 
+
+
+
 #Get the path to Info
-info = Path(__file__).resolve().parent / "Info" 
+info = Path(__file__).resolve().parent / "Info"
+
+
+
 
 
 
@@ -20,11 +26,16 @@ info = Path(__file__).resolve().parent / "Info"
 connect = configparser.ConfigParser()
 connect.read(str(info / "connect.config"))
 myModel = connect["info"]["model"]
+#Context limit from the model
+context = int(connect["info"]["context"])
 #Get the path to keys
 keysFile = info / "keys.txt"
 with keysFile.open( "r", encoding="utf-8") as k:
     keys = [line.strip() for line in k]
     api_key = keys[int(connect["info"]["api_key"])]
+
+
+
 
 
 
@@ -35,6 +46,8 @@ client = OpenAI(
 )
 
 
+
+
 #Load command-line arguements
 parser = argparse.ArgumentParser()
 parser.add_argument("name", help="Enter the name of the novel")
@@ -43,17 +56,25 @@ parser.add_argument("lang", help="Enter the language to translate to")
 args = parser.parse_args()
 
 
+
+
 #Load command-line arguments into global variables
 name = args.name
-currChap = int(args.currChap)
+currChap = float(args.currChap)
 lang = args.lang
 
 
 
 
+
+
+
+
 def main():
-    
+   
     allAtOnce()
+
+
 
 
 #Return the soup
@@ -62,18 +83,23 @@ def getSoup(url, page):
     return BeautifulSoup(page.content(), "html.parser")
 
 
+
+
 #Get all chapter link at once
 def allAtOnce():
     global currChap
+
 
     #Launch chrome and login if needed
     wh.launch_chrome()
     input("Please login if needed, then navigate to the current chapter, press Enter when you're done")
 
+
     #Contain all chapter soups
     soups = []
 
-    #User input
+
+
 
     #Get the soups for all chapters
     while True:
@@ -81,42 +107,102 @@ def allAtOnce():
         webs, page = wh.getWeb()
         soups.append(BeautifulSoup(page.content(), "html.parser"))
 
+
         #Wait for user to go to next chapter, break if the close the page which will raise an error
         try:
             page.wait_for_event("framenavigated")
         except Error as e:
             print(e)
-            break 
-       
-        #Close webs component
-        wh.close_all(webs)
-        time.sleep(2)
+            break
+        finally:
+            #Close webs component
+            wh.close_all(webs)
+            time.sleep(3)
+
+    # All texts spliting from the combined text to ensure token limit
+    oriTexts = []
+    originalText = ""
+    oriChap = currChap
+    #For safety, just use 1/4 of the context
+    limit = int(context / 4)
 
 
-    i = 0
-    #Translate the chapters
-    while i < len(soups):
-        print(f"Processing chap {currChap}")
+    #Collect all the chapters text
+    for i in range(len(soups)):
         #Get the soup
         soup = soups[i]
         text = soup.get_text(separator="\n", strip=True)
         text = fix_text(text)
-       
-        #Translate the text
-        currChapTrans = translate(text)
-
-        #Create novels/novelName directory 
-        novel = info.parent / "novels" / name
-        novel.mkdir(parents=True, exist_ok=True)
-
-        #save it into a file
-        with (novel / f"chapter{currChap}.txt").open("w", encoding="utf-8") as file:
-            file.write(currChapTrans)
 
 
-        print(f"Finished chap {currChap}")
+        #Add current chapter to originalText
+        originalText += f"\nChap{currChap:.0f}\n{text}"
+
+        #Only append NEXTCHAPTER if it's not the end of the input
+        if i != len(soups) - 1:
+            originalText += "\n" + "NEXTCHAPTER"
+
+        #Check if the limit is exceeded
+        l = len(originalText)
+        if l > limit:
+            #Append up to the last newline of the first limit words to oriTexts and assign the remaining to originalText
+            split_idx = originalText[:limit].rfind("\n")
+            if split_idx == -1: 
+                split_idx = limit
+            oriTexts.append(originalText[:split_idx])
+            originalText = originalText[split_idx:]
+
+        
         currChap += 1
-        i += 1
+
+    #Append the remaining of originalText to oriTexts
+    l = len(originalText)
+    while l > 0:
+        if l > limit:
+            #Append up to the last newline of the first limit words to oriTexts and assign the remaining to originalText
+            split_idx = originalText[:limit].rfind("\n")
+            if split_idx == -1: 
+                split_idx = limit
+            oriTexts.append(originalText[:split_idx])
+            originalText = originalText[split_idx:]
+        else:
+            oriTexts.append(originalText)
+            originalText = ""
+        l = len(originalText)
+
+    #For debug, save the whole text to a file
+    with open("novels/oriText.txt", "w", encoding="utf-8") as f:
+        f.write("".join(oriTexts))
+   
+
+
+    #Translate the text
+    print("Translating all chapters")
+    translated = ""
+
+    for i in range(len(oriTexts)):
+        print(f"Processing batch {i}")
+        translated += translate(oriTexts[i])
+
+    #For debug, save the whole translated text to a file
+    with open("novels/transText.txt", "w", encoding="utf-8") as f:
+        f.write(translated)
+
+
+    #Create novels/novelName directory if needed
+    novel = info.parent / "novels" / name
+    novel.mkdir(parents=True, exist_ok=True)
+
+
+   
+    #save it into a file
+    with (novel / f"chapter{oriChap}-{currChap}.txt").open("w", encoding="utf-8") as file:
+        file.write(translated)
+    currChap += 1
+
+
+       
+
 
 
 
@@ -124,22 +210,64 @@ def translate(text):
     global client
     #Create the promt to translate text
     prompt = f"""
-    You’re given the text extracted from the HTML of a chapter on a web‑novel site. Your job is to:
-    **Translate** the *current* chapter’s body text into {lang}.  
-        - **Highest priority**: high-quality translation (produce a fluent, natural, error‑free).  
-        - After your first pass, **reread and refine** for accuracy, consistency, and style. ENSURE THE TRANSLATION QUALITY IS HIGH AND PROFESSIONAL
-        - Omit any irrelevant words only if you're sure that it's not part of the chapter content because the text extracted from HTML may contain the text which isn't in the chapter content
-    **Output format** :
-    <Translated Chapter Text> (just plain text for reading)
-    - **Do not** output anything else (no HTML tag, no commentary, no extra labels, just the content of the chapter).
-    Here is the text to process:
+    **Role**: Professional Literary Translator
+    **Task**: Translate web novel chapters into {lang}
+
+
+    ### Input Specifications
+    - Input contains multiple chapters separated by EXACTLY: `NEXTCHAPTER`. Each chapter have its own chapter number in English at the beginning
+    - Chapter order: the same order of the input
+    - HTML artifacts may be present (navigation, ads, etc.)
+
+
+    ### Translation Requirements
+    1. **Quality Assurance**:
+    - Perform **dual-pass translation**:
+        First pass: Complete translation
+        Second pass: Refine for fluency, consistency, and style
+    - Preserve:
+        - Narrative voice and tone
+        - Cultural context (adapt appropriately)
+        - Dialogue rhythms and speech patterns
+
+
+    2. **Content Handling**:
+    - RETAIN all story elements (dialogue, descriptions, sound effects)
+    - REMOVE non-story elements (page numbers, "next chapter" prompts, remaining HTML elements, unrelated or nonsense characters,...)
+
+
+    ### Output Formatting Rules
+    **STRICTLY FOLLOW THESE FORMAT INSTRUCTIONS:**
+    1. Output ONLY chapter number and its translated chapter content separated by:
+    `NEXTCHAPTER` (exactly this string, case-sensitive)
+    2. Format per chapter:
+    [Translated Chapter Content]NEXTCHAPTER[Next Chapter Content]
+    3. ABSOLUTELY NO:
+    - Other unnecessary words (Here is the translated content with all non-story elements removed and chapters separated by NEXTCHAPTER as instructed,...)
+    - HTML/XML tags
+    - Additional labels or formatting
+    4. Ensure `NEXTCHAPTER` appears EXACTLY ONCE between chapters
+    5. Never use `NEXTCHAPTER` within chapter content
+    6. In the input, if there is no chapter number at the beginning of a chapter, don't include the chapter number of that chapter in the translated output
+
+
+    ### Critical Validation
+    Before outputting, verify:
+    ✅ Separators are EXACTLY `NEXTCHAPTER` (11 characters)
+    ✅ No separator appears inside chapter text
+    ✅ Chapter count matches input
+    ✅ Output begins/ends with chapter content (no separators at start/end)
+    ✅ Entire output is a SINGLE string with embedded separators
+
+
+    *** INPUT TEXT ***
     {text}
     """
 
+    #Try to get the respons, switch model if rate-limit is exceeded
     #Number of tries, max is the number of keys in keys.text
     i = 0
     while i < len(keys):
-        #Try to get the respons, switch model if rate-limit is exceeded
         try:
             # Get the reposnse from AI
             reponse = client.chat.completions.create(
@@ -155,10 +283,12 @@ def translate(text):
         except RateLimitError:
             print("Rate limit exceeded")
 
+
             #Check if tried all the keys
             i += 1
             if i >= len(keys):
                 break
+
 
             #Update the new key
             newKey = (int(connect["info"]["api_key"]) + 1) % len(keys)
@@ -172,11 +302,18 @@ def translate(text):
             )
             print(f"Changed to key {newKey}. Retrying {i}")
 
+
     if i == len(keys):
         sys.exit("All keys exhausted, please add new key or wait a day")
 
+
+    print(reponse.choices[0].message.content)
     #Load the url of the next chapter and the translation
     return reponse.choices[0].message.content
+
+
+
+
 
 
 #Navigate from chapter to chapter
@@ -194,6 +331,10 @@ def chapToChap(page):
 
 
 
+
+
+
+
         #Get all the links from the HTML
         links = ""
         for a in soup.find_all("a", href=True):
@@ -202,8 +343,14 @@ def chapToChap(page):
 
 
 
+
+
+
+
         #Translate the text
         currChapTrans = translate(text)
+
+
 
 
         #save it into a file
@@ -211,7 +358,11 @@ def chapToChap(page):
             file.write(currChapTrans)
 
 
+
+
         print(f"Finished chap {currChap}")
+
+
 
 
        
@@ -227,6 +378,8 @@ def chapToChap(page):
         Here is the URL of the website of the current chapter:
         {currUrl}
         """
+
+
 
 
         # Get the reposnse from AI
@@ -247,11 +400,46 @@ def chapToChap(page):
 
 
 
-
-
-
 if __name__ == '__main__':
     main()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
