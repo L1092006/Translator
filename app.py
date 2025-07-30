@@ -193,10 +193,10 @@ def allAtOnce():
     novel = info.parent / "novels" / name
     novel.mkdir(parents=True, exist_ok=True)
 
-
+    currChap -= 1
    
     #save it into a file
-    with (novel / f"chapter{oriChap}-{currChap}.txt").open("w", encoding="utf-8") as file:
+    with (novel / f"chapter{oriChap:0f}-{currChap:.0f}.txt").open("w", encoding="utf-8") as file:
         file.write(translated)
     currChap += 1
 
