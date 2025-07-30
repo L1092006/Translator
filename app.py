@@ -119,6 +119,66 @@ def allAtOnce():
         i += 1
 
 
+
+def translate(text):
+    global client
+    #Create the promt to translate text
+    prompt = f"""
+    You’re given the text extracted from the HTML of a chapter on a web‑novel site. Your job is to:
+    **Translate** the *current* chapter’s body text into {lang}.  
+        - **Highest priority**: high-quality translation (produce a fluent, natural, error‑free).  
+        - After your first pass, **reread and refine** for accuracy, consistency, and style. ENSURE THE TRANSLATION QUALITY IS HIGH AND PROFESSIONAL
+        - Omit any irrelevant words only if you're sure that it's not part of the chapter content because the text extracted from HTML may contain the text which isn't in the chapter content
+    **Output format** :
+    <Translated Chapter Text> (just plain text for reading)
+    - **Do not** output anything else (no HTML tag, no commentary, no extra labels, just the content of the chapter).
+    Here is the text to process:
+    {text}
+    """
+
+    #Number of tries, max is the number of keys in keys.text
+    i = 0
+    while i < len(keys):
+        #Try to get the respons, switch model if rate-limit is exceeded
+        try:
+            # Get the reposnse from AI
+            reponse = client.chat.completions.create(
+                model=myModel,
+                messages=[
+                    {
+                    "role": "user",
+                    "content": prompt
+                    }
+                ]
+            )
+            break
+        except RateLimitError:
+            print("Rate limit exceeded")
+
+            #Check if tried all the keys
+            i += 1
+            if i >= len(keys):
+                break
+
+            #Update the new key
+            newKey = (int(connect["info"]["api_key"]) + 1) % len(keys)
+            connect["info"]["api_key"] = str(newKey)
+            with (info / "connect.config").open( "w", encoding="utf-8") as c:
+                connect.write(c)
+            api_key = keys[newKey]
+            client = OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key= api_key
+            )
+            print(f"Changed to key {newKey}. Retrying {i}")
+
+    if i == len(keys):
+        sys.exit("All keys exhausted, please add new key or wait a day")
+
+    #Load the url of the next chapter and the translation
+    return reponse.choices[0].message.content
+
+
 #Navigate from chapter to chapter
 def chapToChap(page):
     global currChap
@@ -188,73 +248,6 @@ def chapToChap(page):
 
 
 
-
-       
-
-
-
-
-
-
-
-
-def translate(text):
-    global client
-    #Create the promt to translate text
-    prompt = f"""
-    You’re given the text extracted from the HTML of a chapter on a web‑novel site. Your job is to:
-    **Translate** the *current* chapter’s body text into {lang}.  
-        - **Highest priority**: high-quality translation (produce a fluent, natural, error‑free).  
-        - After your first pass, **reread and refine** for accuracy, consistency, and style. ENSURE THE TRANSLATION QUALITY IS HIGH AND PROFESSIONAL
-        - Omit any irrelevant words only if you're sure that it's not part of the chapter content because the text extracted from HTML may contain the text which isn't in the chapter content
-    **Output format** :
-    <Translated Chapter Text> (just plain text for reading)
-    - **Do not** output anything else (no HTML tag, no commentary, no extra labels, just the content of the chapter).
-    Here is the text to process:
-    {text}
-    """
-
-    #Number of tries, max is the number of keys in keys.text
-    i = 0
-    while i < len(keys):
-        #Try to get the respons, switch model if rate-limit is exceeded
-        try:
-            # Get the reposnse from AI
-            reponse = client.chat.completions.create(
-                model=myModel,
-                messages=[
-                    {
-                    "role": "user",
-                    "content": prompt
-                    }
-                ]
-            )
-            break
-        except RateLimitError:
-            print("Rate limit exceeded")
-
-            #Check if tried all the keys
-            i += 1
-            if i >= len(keys):
-                break
-
-            #Update the new key
-            newKey = (int(connect["info"]["api_key"]) + 1) % len(keys)
-            connect["info"]["api_key"] = str(newKey)
-            with (info / "connect.config").open( "w", encoding="utf-8") as c:
-                connect.write(c)
-            api_key = keys[newKey]
-            client = OpenAI(
-                base_url="https://openrouter.ai/api/v1",
-                api_key= api_key
-            )
-            print(f"Changed to key {newKey}. Retrying {i}")
-
-    if i == len(keys):
-        sys.exit("All keys exhausted, please add new key or wait a day")
-
-    #Load the url of the next chapter and the translation
-    return reponse.choices[0].message.content
 
 
 if __name__ == '__main__':
