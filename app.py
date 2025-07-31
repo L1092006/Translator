@@ -8,7 +8,7 @@ import test as wh
 from pathlib import Path
 import sys
 import time
-
+import tiktoken
 
 
 
@@ -17,23 +17,21 @@ import time
 #Get the path to Info
 info = Path(__file__).resolve().parent / "Info"
 
-
-
-
-
-
 #Load api_key and model from connect.config
 connect = configparser.ConfigParser()
 connect.read(str(info / "connect.config"))
 myModel = connect["info"]["model"]
-#Context limit from the model
-context = int(connect["info"]["context"])
+
 #Get the path to keys
 keysFile = info / "keys.txt"
 with keysFile.open( "r", encoding="utf-8") as k:
     keys = [line.strip() for line in k]
     api_key = keys[int(connect["info"]["api_key"])]
-
+    
+#Context limit from the model
+context = int(connect["info"]["context"])
+limit = int(context / 4)
+enc = tiktoken.get_encoding("cl100k_base")
 
 
 
@@ -55,9 +53,6 @@ parser.add_argument("currChap", help="Enter the current chapter")
 parser.add_argument("lang", help="Enter the language to translate to")
 args = parser.parse_args()
 
-
-
-
 #Load command-line arguments into global variables
 name = args.name
 currChap = float(args.currChap)
@@ -65,8 +60,20 @@ lang = args.lang
 
 
 
+#Create novels/novelName directory if needed
+novel = info.parent / "novels" / name
+novel.mkdir(parents=True, exist_ok=True)
 
-
+#Create novelSpecific.txt if needed
+try:
+    with (novel / "novelSpecific.txt").open("x", encoding="utf-8") as ns:
+        with (info / "template.txt").open("r", encoding="utf-8") as file:
+            template = ""
+            for line in file:
+                template += line
+        ns.write(template)
+except FileExistsError:
+    pass
 
 
 
@@ -124,7 +131,7 @@ def allAtOnce():
     originalText = ""
     oriChap = currChap
     #For safety, just use 1/4 of the context
-    limit = int(context / 4)
+    
 
 
     #Collect all the chapters text
@@ -143,7 +150,7 @@ def allAtOnce():
             originalText += "\n" + "NEXTCHAPTER"
 
         #Check if the limit is exceeded
-        l = len(originalText)
+        l = len(enc.encode(originalText))
         if l > limit:
             #Append up to the last newline of the first limit words to oriTexts and assign the remaining to originalText
             split_idx = originalText[:limit].rfind("\n")
@@ -156,7 +163,7 @@ def allAtOnce():
         currChap += 1
 
     #Append the remaining of originalText to oriTexts
-    l = len(originalText)
+    l = len(enc.encode(originalText))
     while l > 0:
         if l > limit:
             #Append up to the last newline of the first limit words to oriTexts and assign the remaining to originalText
@@ -168,7 +175,7 @@ def allAtOnce():
         else:
             oriTexts.append(originalText)
             originalText = ""
-        l = len(originalText)
+        l = len(enc.encode(originalText))
 
     #For debug, save the whole text to a file
     with open("novels/oriText.txt", "w", encoding="utf-8") as f:
@@ -189,10 +196,6 @@ def allAtOnce():
         f.write(translated)
 
 
-    #Create novels/novelName directory if needed
-    novel = info.parent / "novels" / name
-    novel.mkdir(parents=True, exist_ok=True)
-
     currChap -= 1
    
     #save it into a file
@@ -202,67 +205,66 @@ def allAtOnce():
 
 
        
-
-
-
-
+#Translate the text and update the prompt (novelSpecific.txt) as needed
 def translate(text):
     global client
+
+    #Get the general requirements
+    with (info / "generalPrompt.txt").open("r", encoding="utf-8") as file:
+        genRe = ""
+        for line in file:
+            genRe += line
+    
+    #Get novel-specific requirements
+    with (novel / "novelSpecific.txt").open("r", encoding="utf-8") as file:
+        noRe = ""
+        for line in file:
+            noRe += line
+
+
     #Create the promt to translate text
     prompt = f"""
-    **Role**: Professional Literary Translator
-    **Task**: Translate web novel chapters into {lang}
+**Role**: Professional Literary Translator  
+**Task**: Translate web-novel chapters into {lang} and **update** this novel’s specific requirements for future use.
 
+=== INPUT SPECIFICATIONS ===
+- Multiple chapters separated by the exact string `NEXTCHAPTER`.  
+- Each chapter begins with its English chapter number (if present).  
+- HTML artifacts (navigation bars, ads, stray tags) may appear.
 
-    ### Input Specifications
-    - Input contains multiple chapters separated by EXACTLY: `NEXTCHAPTER`. Each chapter have its own chapter number in English at the beginning
-    - Chapter order: the same order of the input
-    - HTML artifacts may be present (navigation, ads, etc.)
+=== TRANSLATION REQUIREMENTS ===
+1. **Quality Assurance**  
+   {genRe.strip()}
 
+2. **Novel-Specific Requirements**  
+   **Warning**: The list below may be incomplete and contain templates (`<…>`) you must fill in based on the chapters’ content.  
+   - If you spot a `<template>`, replace it with a concrete value drawn from the text.  
+   - If you identify missing constraints or patterns, **add** detailed rules here.  
+   - You may **remove** outdated rules only if you’re certain they won’t be needed later—but think carefully before dropping anything.  
+   - **Keep the same numbered/list format**, and return the **entire** updated section (not just your changes):
 
-    ### Translation Requirements
-    1. **Quality Assurance**:
-    - Perform **dual-pass translation**:
-        First pass: Complete translation
-        Second pass: Refine for fluency, consistency, and style
-    - Preserve:
-        - Narrative voice and tone
-        - Cultural context (adapt appropriately)
-        - Dialogue rhythms and speech patterns
+   {noRe.strip()}
 
+3. **Content Handling**  
+   - **Retain**: all story elements (dialogue, descriptions, sound effects).  
+   - **Remove**: non-story elements (page numbers, “next chapter” prompts, HTML tags, stray characters).
 
-    2. **Content Handling**:
-    - RETAIN all story elements (dialogue, descriptions, sound effects)
-    - REMOVE non-story elements (page numbers, "next chapter" prompts, remaining HTML elements, unrelated or nonsense characters,...)
+=== OUTPUT FORMAT ===  
+1. Chapters **only**, in the same order as input.  
+2. Between each chapter, insert **exactly one** `NEXTCHAPTER` (case-sensitive).  
+3. After the final chapter, append `CHAPTERSENDED` (case-sensitive), then the **full** updated Novel-Specific Requirements.  
+4. **Do not** emit any extra text, labels, HTML/XML tags, or explanation.  
+5. Ensure neither `NEXTCHAPTER` nor `CHAPTERSENDED` appears **inside** any chapter’s text.
 
+**Strict Validation** (self-check before returning):  
+- Separator count and placement are correct.  
+- Chapter count matches the input.  
+- Output is a single continuous string (no leading/trailing separators).
 
-    ### Output Formatting Rules
-    **STRICTLY FOLLOW THESE FORMAT INSTRUCTIONS:**
-    1. Output ONLY chapter number and its translated chapter content separated by:
-    `NEXTCHAPTER` (exactly this string, case-sensitive)
-    2. Format per chapter:
-    [Translated Chapter Content]NEXTCHAPTER[Next Chapter Content]
-    3. ABSOLUTELY NO:
-    - Other unnecessary words (Here is the translated content with all non-story elements removed and chapters separated by NEXTCHAPTER as instructed,...)
-    - HTML/XML tags
-    - Additional labels or formatting
-    4. Ensure `NEXTCHAPTER` appears EXACTLY ONCE between chapters
-    5. Never use `NEXTCHAPTER` within chapter content
-    6. In the input, if there is no chapter number at the beginning of a chapter, don't include the chapter number of that chapter in the translated output
+=== SOURCE TEXT ===  
+{text}
+"""
 
-
-    ### Critical Validation
-    Before outputting, verify:
-    ✅ Separators are EXACTLY `NEXTCHAPTER` (11 characters)
-    ✅ No separator appears inside chapter text
-    ✅ Chapter count matches input
-    ✅ Output begins/ends with chapter content (no separators at start/end)
-    ✅ Entire output is a SINGLE string with embedded separators
-
-
-    *** INPUT TEXT ***
-    {text}
-    """
 
     #Try to get the respons, switch model if rate-limit is exceeded
     #Number of tries, max is the number of keys in keys.text
@@ -279,7 +281,17 @@ def translate(text):
                     }
                 ]
             )
+            print(reponse.choices[0].message.content)
+            results =  reponse.choices[0].message.content.split("CHAPTERSENDED")
+            #Raise error to retry if the response format is wrong
+            if len(results) != 2:
+                 print(f"Wrong use of CHAPTERSENDED, got {len(results)} parts")
+                 print(f"Retrying")
+                 raise ValueError()
+            
             break
+
+        #Handle the rate-limit exceeced error
         except RateLimitError:
             print("Rate limit exceeded")
 
@@ -302,17 +314,17 @@ def translate(text):
             )
             print(f"Changed to key {newKey}. Retrying {i}")
 
+        #Handle the wrong format
+        except ValueError:
+            pass
+
 
     if i == len(keys):
         sys.exit("All keys exhausted, please add new key or wait a day")
-
-
-    print(reponse.choices[0].message.content)
-    #Load the url of the next chapter and the translation
-    return reponse.choices[0].message.content
-
-
-
+    
+    with (novel / "novelSpecific.txt").open("w", encoding="utf-8") as file:
+        file.write(results[1])
+    return results[0]
 
 
 
@@ -328,44 +340,20 @@ def chapToChap(page):
         text = soup.get_text(separator="\n", strip=True)
         text = fix_text(text)
 
-
-
-
-
-
-
-
         #Get all the links from the HTML
         links = ""
         for a in soup.find_all("a", href=True):
             links += a["href"] + "|||"
 
-
-
-
-
-
-
-
         #Translate the text
         currChapTrans = translate(text)
-
-
-
 
         #save it into a file
         with open(f"novels/chapter{currChap}.txt", "w", encoding="utf-8") as file:
             file.write(currChapTrans)
 
-
-
-
         print(f"Finished chap {currChap}")
 
-
-
-
-       
         prompt = f"""
         You’re given all URLs extracted from the HTML of a chapter on a web‑novel site and the URL of the website. Your job is to:
         Return to me the whole URL to the next chapter which I can use to paste directly in the browser.  
@@ -378,9 +366,6 @@ def chapToChap(page):
         Here is the URL of the website of the current chapter:
         {currUrl}
         """
-
-
-
 
         # Get the reposnse from AI
         reponse = client.chat.completions.create(
@@ -396,8 +381,6 @@ def chapToChap(page):
         #Load the url of the next chapterand the translation
         currUrl = reponse.choices[0].message.content
         currChap += 1
-
-
 
 
 if __name__ == '__main__':
