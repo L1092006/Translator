@@ -55,7 +55,7 @@ args = parser.parse_args()
 
 #Load command-line arguments into global variables
 name = args.name
-currChap = float(args.currChap)
+currChap = int(args.currChap)
 lang = args.lang
 
 
@@ -143,7 +143,7 @@ def allAtOnce():
 
 
         #Add current chapter to originalText
-        originalText += f"\nChap{currChap:.0f}\n{text}"
+        originalText += f"\nChap{currChap}\n{text}"
 
         #Only append NEXTCHAPTER if it's not the end of the input
         if i != len(soups) - 1:
@@ -199,7 +199,7 @@ def allAtOnce():
     currChap -= 1
    
     #save it into a file
-    with (novel / f"chapter{oriChap:0f}-{currChap:.0f}.txt").open("w", encoding="utf-8") as file:
+    with (novel / f"chapter{oriChap}-{currChap}.txt").open("w", encoding="utf-8") as file:
         file.write(translated)
     currChap += 1
 
@@ -207,7 +207,6 @@ def allAtOnce():
        
 #Translate the text and update the prompt (novelSpecific.txt) as needed
 def translate(text):
-    global client
 
     #Get the general requirements
     with (info / "generalPrompt.txt").open("r", encoding="utf-8") as file:
@@ -221,52 +220,120 @@ def translate(text):
         for line in file:
             noRe += line
 
+    
+    
 
     #Create the promt to translate text
     prompt = f"""
-**Role**: Professional Literary Translator  
-**Task**: Translate web-novel chapters into {lang} and **update** this novel’s specific requirements for future use.
+    **Role**: Professional Literary Translator  
+    **Task**: Translate web-novel chapters into {lang} and **update** this novel’s specific requirements for future use.
 
-=== INPUT SPECIFICATIONS ===
-- Multiple chapters separated by the exact string `NEXTCHAPTER`.  
-- Each chapter begins with its English chapter number (if present).  
-- HTML artifacts (navigation bars, ads, stray tags) may appear.
+    === INPUT SPECIFICATIONS ===
+    - Multiple chapters separated by the exact string `NEXTCHAPTER`.  
+    - Each chapter begins with its English chapter number (if present).  
+    - HTML artifacts (navigation bars, ads, stray tags) may appear.
 
-=== TRANSLATION REQUIREMENTS ===
-1. **Quality Assurance**  
-   {genRe.strip()}
+    === TRANSLATION REQUIREMENTS ===
+    1. **Quality Assurance**  
+    {genRe.strip()}
 
-2. **Novel-Specific Requirements**  
-   **Warning**: The list below may be incomplete and contain templates (`<…>`) you must fill in based on the chapters’ content.  
-   - If you spot a `<template>`, replace it with a concrete value drawn from the text.  
-   - If you identify missing constraints or patterns, **add** detailed rules here.  
-   - You may **remove** outdated rules only if you’re certain they won’t be needed later—but think carefully before dropping anything.  
-   - **Keep the same numbered/list format**, and return the **entire** updated section (not just your changes):
+    2. **Novel-Specific Requirements**  
+    **Warning**: The list below may be incomplete and contain templates (`<…>`) you must fill in based on the chapters’ content.  
+    - If you spot a `<template>`, ignore this Novel-Specific Requirements
+    Begin of Novel-Specific Requirements
+    {noRe.strip()}
+    End of Novel-Specific Requirements
 
-   {noRe.strip()}
+    3. **Content Handling**  
+    - **Retain**: all story elements (dialogue, descriptions, sound effects).  
+    - **Remove**: non-story elements (page numbers, “next chapter” prompts, HTML tags, stray characters).
 
-3. **Content Handling**  
-   - **Retain**: all story elements (dialogue, descriptions, sound effects).  
-   - **Remove**: non-story elements (page numbers, “next chapter” prompts, HTML tags, stray characters).
+    === OUTPUT FORMAT ===  
+    1. Chapters **only**, in the same order as input.  
+    2. Between each chapter, insert **exactly one** `NEXTCHAPTER` (case-sensitive).  
+    3. **Do not** emit any extra text, labels, HTML/XML tags, or explanation.  
+    4. Ensure neither `NEXTCHAPTER` nor `CHAPTERSENDED` appears **inside** any chapter’s text.
 
-=== OUTPUT FORMAT ===  
-1. Chapters **only**, in the same order as input.  
-2. Between each chapter, insert **exactly one** `NEXTCHAPTER` (case-sensitive).  
-3. After the final chapter, append `CHAPTERSENDED` (case-sensitive), then the **full** updated Novel-Specific Requirements.  
-4. **Do not** emit any extra text, labels, HTML/XML tags, or explanation.  
-5. Ensure neither `NEXTCHAPTER` nor `CHAPTERSENDED` appears **inside** any chapter’s text.
+    **Strict Validation** (self-check before returning):  
+    - Separator count and placement are correct.  
+    - Chapter count matches the input.  
+    - Output is a single continuous string (no leading/trailing separators).
 
-**Strict Validation** (self-check before returning):  
-- Separator count and placement are correct.  
-- Chapter count matches the input.  
-- Output is a single continuous string (no leading/trailing separators).
+    === SOURCE TEXT ===  
+    {text}
+    """
+    translated = response(prompt)
 
-=== SOURCE TEXT ===  
-{text}
-"""
+    prompt = f"""
+    **ROLE**: You are a translation meta-analyst specializing translating to {lang} literary translation. Your task is to update the translator's note by learning from provided translations of several chapters of a novel.
 
+    **INPUT PROCESSING**:
+    - Analyze translation choices against all sections of the current note
+    - Identify patterns to update: glossary terms, style observations, audience adjustments, etc.
+    - Update ALL applicable sections while preserving original structure
+    - WARNING!!!: The original adn translated texts may have irrelavant words, symbols, HTML tags,... Ignore them during your analysis
 
-    #Try to get the respons, switch model if rate-limit is exceeded
+    **UPDATE RULES FOR EACH SECTION**:
+    1. **ROLE & TONE**  
+    - Add observed style patterns as bullet points under existing guidelines
+    - Example: `- Observed frequent use of alliteration → maintained in translation`
+
+    2. **AUDIENCE & REGISTER**  
+    - Note any vocabulary level adjustments made for target audience
+    - Example: `- Simplified archaic terms for YA audience`
+
+    3. **STRUCTURE & FORMATTING**  
+    - Record any consistent formatting decisions
+    - Example: `- Preserved em-dash usage for interrupted dialogue`
+
+    4. **IDIOMS & CULTURAL REFERENCES**  
+    - Add recurring translation patterns as new bullet points
+    - Example: `- 'Kick the bucket' → 'Bite the dust' (humorous equivalent)`
+
+    5. **QUALITY CONTROL**  
+    - Add observed proofreading patterns
+    - Example: `- Consistently converted passive→active voice`
+
+    6. **GLOSSARY & CONSISTENCY**  
+    - Append new terms at bottom of list
+    - Maintain exact `• <Original> → <Translation>` format
+
+    7. **NOVEL SUMMARY**  
+    - Append a concise summary of the chapters to existing text
+    - May remove the content you're certain that it will NOT BE NEEDED FOR FUUTURE TRANSLATION
+    OUTPUT RULES:
+        Return ONLY the complete updated note in EXACT original format
+        Preserve all original headers and section numbering
+
+    **CRITICAL INSTRUCTIONS**
+    For section updates:
+    - Add new bullets UNDER existing guidelines
+    - Preserve original wording of core instructions
+    - Never remove existing content except for the summary
+
+    **Here are the inputs**
+
+    *Original Text*
+    {text}
+
+    *Translated Text*
+    {translated}
+
+    *Current Note*
+    {noRe}
+    """
+    noRe = response(prompt)
+    with (novel / "novelSpecific.txt").open("w", encoding="utf-8") as file:
+        file.write(noRe)
+
+    
+    
+    
+    return translated
+
+def response(prompt):
+    global client
+     #Try to get the respons, switch model if rate-limit is exceeded
     #Number of tries, max is the number of keys in keys.text
     i = 0
     while i < len(keys):
@@ -282,14 +349,7 @@ def translate(text):
                 ]
             )
             print(reponse.choices[0].message.content)
-            results =  reponse.choices[0].message.content.split("CHAPTERSENDED")
-            #Raise error to retry if the response format is wrong
-            if len(results) != 2:
-                 print(f"Wrong use of CHAPTERSENDED, got {len(results)} parts")
-                 print(f"Retrying")
-                 raise ValueError()
-            
-            break
+            return reponse.choices[0].message.content
 
         #Handle the rate-limit exceeced error
         except RateLimitError:
@@ -314,19 +374,9 @@ def translate(text):
             )
             print(f"Changed to key {newKey}. Retrying {i}")
 
-        #Handle the wrong format
-        except ValueError:
-            pass
-
-
     if i == len(keys):
         sys.exit("All keys exhausted, please add new key or wait a day")
-    
-    with (novel / "novelSpecific.txt").open("w", encoding="utf-8") as file:
-        file.write(results[1])
-    return results[0]
-
-
+    return reponse.choices[0].message.content
 
 #Navigate from chapter to chapter
 def chapToChap(page):
