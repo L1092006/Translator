@@ -4,7 +4,7 @@ import argparse
 from ftfy import fix_text
 from bs4 import BeautifulSoup
 from playwright.sync_api import Error
-import test as wh
+import webhandler as wh
 from pathlib import Path
 import sys
 import time
@@ -30,6 +30,7 @@ with keysFile.open( "r", encoding="utf-8") as k:
     
 #Context limit from the model
 context = int(connect["info"]["context"])
+#For safety, just use 1/4 of the context
 limit = int(context / 4)
 enc = tiktoken.get_encoding("cl100k_base")
 
@@ -130,8 +131,6 @@ def allAtOnce():
     oriTexts = []
     originalText = ""
     oriChap = currChap
-    #For safety, just use 1/4 of the context
-    
 
 
     #Collect all the chapters text
