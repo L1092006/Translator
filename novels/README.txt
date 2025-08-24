@@ -1,0 +1,1 @@
+All novels' translations will appear here.

@@ -1,0 +1,7 @@
+- Perform **dual-pass translation**:
+        First pass: Complete translation
+        Second pass: Refine for fluency, consistency, and style
+    - Preserve:
+        - Narrative voice and tone
+        - Cultural context (adapt appropriately)
+        - Dialogue rhythms and speech patterns
