@@ -226,11 +226,12 @@ def translate(text):
     #Create the promt to translate text
     prompt = f"""
     **Role**: Professional Literary Translator  
-    **Task**: Translate web-novel chapters into {lang} and **update** this novel’s specific requirements for future use.
+    **Task**: Translate web-novel chapters into {lang}
 
     === INPUT SPECIFICATIONS ===
     - Multiple chapters separated by the exact string `NEXTCHAPTER`.  
-    - Each chapter begins with its English chapter number (if present).  
+    - Each chapter begins with its English chapter number (if present). 
+    - May have some ongoing content of a previous chapter with no chapter number. 
     - HTML artifacts (navigation bars, ads, stray tags) may appear.
 
     === TRANSLATION REQUIREMENTS ===
@@ -238,7 +239,7 @@ def translate(text):
     {genRe.strip()}
 
     2. **Novel-Specific Requirements**  
-    **Warning**: The list below may be incomplete and contain templates (`<…>`) you must fill in based on the chapters’ content.  
+    **Warning**: The list below may be incomplete and contain templates (`<…>`) 
     - If you spot a `<template>`, ignore this Novel-Specific Requirements
     Begin of Novel-Specific Requirements
     {noRe.strip()}
@@ -246,18 +247,21 @@ def translate(text):
 
     3. **Content Handling**  
     - **Retain**: all story elements (dialogue, descriptions, sound effects).  
-    - **Remove**: non-story elements (page numbers, “next chapter” prompts, HTML tags, stray characters).
+    - **Remove**: non-story elements (page numbers, HTML tags, stray characters, extra text, labels, irrelevant to the novel).
 
     === OUTPUT FORMAT ===  
-    1. Chapters **only**, in the same order as input.  
-    2. Between each chapter, insert **exactly one** `NEXTCHAPTER` (case-sensitive).  
-    3. **Do not** emit any extra text, labels, HTML/XML tags, or explanation.  
-    4. Ensure neither `NEXTCHAPTER` nor `CHAPTERSENDED` appears **inside** any chapter’s text.
+    1. Chapters **only**, in the same order as input.
+    2. At the beginning of each chapter, include chapter numbers only if there's a chapter number for that corresponding chapter in the original text.  
+    3. Between each chapter, insert **exactly one** `NEXTCHAPTER` (case-sensitive).  
+    4. Emit any extra text, labels, HTML/XML tags, or explanation irrelevant to the novel.  
+    5. Ensure neither `NEXTCHAPTER` appears **inside** any chapter’s text.
+    6. Add an empty line between lines of text.
+    7. DO NOT add `NEXTCHAPTER` at the end of your response
 
     **Strict Validation** (self-check before returning):  
     - Separator count and placement are correct.  
     - Chapter count matches the input.  
-    - Output is a single continuous string (no leading/trailing separators).
+
 
     === SOURCE TEXT ===  
     {text}
@@ -265,13 +269,14 @@ def translate(text):
     translated = response(prompt)
 
     prompt = f"""
-    **ROLE**: You are a translation meta-analyst specializing translating to {lang} literary translation. Your task is to update the translator's note by learning from provided translations of several chapters of a novel.
+    **ROLE**: You are a translation meta-analyst specializing translating to {lang} literary translation. Your task is to update the translator's note by learning from provided translations of several chapters of a novel. 
 
     **INPUT PROCESSING**:
     - Analyze translation choices against all sections of the current note
     - Identify patterns to update: glossary terms, style observations, audience adjustments, etc.
     - Update ALL applicable sections while preserving original structure
     - WARNING!!!: The original adn translated texts may have irrelavant words, symbols, HTML tags,... Ignore them during your analysis
+    - The updated note must be in {lang}.
 
     **UPDATE RULES FOR EACH SECTION**:
     1. **ROLE & TONE**  
@@ -286,21 +291,25 @@ def translate(text):
     - Record any consistent formatting decisions
     - Example: `- Preserved em-dash usage for interrupted dialogue`
 
-    4. **IDIOMS & CULTURAL REFERENCES**  
-    - Add recurring translation patterns as new bullet points
-    - Example: `- 'Kick the bucket' → 'Bite the dust' (humorous equivalent)`
-
-    5. **QUALITY CONTROL**  
+    4. **QUALITY CONTROL**  
     - Add observed proofreading patterns
     - Example: `- Consistently converted passive→active voice`
 
-    6. **GLOSSARY & CONSISTENCY**  
+    5. **GLOSSARY & CONSISTENCY**  
     - Append new terms at bottom of list
+    - Only append important terms which may appear frequently
     - Maintain exact `• <Original> → <Translation>` format
 
-    7. **NOVEL SUMMARY**  
-    - Append a concise summary of the chapters to existing text
-    - May remove the content you're certain that it will NOT BE NEEDED FOR FUUTURE TRANSLATION
+    6. **Important Characters**
+    - Add newly obtained essential infomation about the characters
+
+    7. **Character Interactions**
+    - Add the ways that characters call each other if there are new characters introduced
+    - Adjust the ways current characters call each others if their relationships change
+
+    8. **NOVEL SUMMARY**  
+    - Add a concise summary of the new chapters to existing text
+
     OUTPUT RULES:
         Return ONLY the complete updated note in EXACT original format
         Preserve all original headers and section numbering
@@ -309,7 +318,8 @@ def translate(text):
     For section updates:
     - Add new bullets UNDER existing guidelines
     - Preserve original wording of core instructions
-    - Never remove existing content except for the summary
+    - May remove the content you're certain that it will NOT BE NEEDED FOR FUTURE TRANSLATION
+    - DO NOT MODIFY THE EXISTING CONTENT (may only remove a content, if not remove then don't modify it)
 
     **Here are the inputs**
 
@@ -332,6 +342,7 @@ def translate(text):
     return translated
 
 def response(prompt):
+    print(prompt)
     global client
      #Try to get the respons, switch model if rate-limit is exceeded
     #Number of tries, max is the number of keys in keys.text
@@ -373,6 +384,9 @@ def response(prompt):
                 api_key= api_key
             )
             print(f"Changed to key {newKey}. Retrying {i}")
+        except Exception as e:
+            # Catch all other errors so it doesn't break the loop
+            print(f"Error during API request: {e}")
 
     if i == len(keys):
         sys.exit("All keys exhausted, please add new key or wait a day")
