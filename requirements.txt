@@ -1,0 +1,6 @@
+openai
+ftfy
+beautifulsoup4
+playwright
+tiktoken
+requests
