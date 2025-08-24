@@ -1,5 +1,4 @@
 test.py
-info/
 extractLink.py
-novels/
 __pycache__/
+ignore/
